@@ -25,7 +25,7 @@ def get_args():
     parser.add_argument(
         "--snapshot",
         type=str,
-        default="output/snapshot_epoch0_acc0.6678260869565218",
+        default="output/snapshot_epoch15_acc0.8573913043478261",
         help=f"path to snapshot",
     )
     parser.add_argument(
@@ -34,7 +34,7 @@ def get_args():
     parser.add_argument(
         "--filepath",
         type=str,
-        default="/data/xiexuan/imagenet/classes_23/val/n09193705/ILSVRC2012_val_00000002.JPEG",
+        default="val/n10565667/ILSVRC2012_val_00000255.JPEG",
         help="path to an image file",
     )
     parser.add_argument(
