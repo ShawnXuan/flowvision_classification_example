@@ -9,4 +9,5 @@ python3 -m oneflow.distributed.launch \
     --master_addr 127.0.0.1 \
     finetune.py \
         --batch_size 64 \
+	--save_snapshot \
         --data_dir=$DATA_ROOT 

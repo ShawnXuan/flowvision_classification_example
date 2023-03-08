@@ -5,8 +5,6 @@ import numpy as np
 
 import oneflow as flow
 import oneflow.nn as nn
-import flowvision
-import flowvision.transforms as transforms
 import flowvision.datasets as datasets
 from oneflow.utils.data import DataLoader
 
@@ -16,12 +14,7 @@ from flowvision.loss.cross_entropy import LabelSmoothingCrossEntropy
 
 from sklearn.metrics import accuracy_score
 
-
-model_dict = {
-    "resnet50": flowvision.models.resnet50,
-    "resnet101": flowvision.models.resnet101,
-    "vgg16": flowvision.models.vgg16,
-}
+from utils import model_dict, val_transforms, train_transforms
 
 
 def get_args():
@@ -44,10 +37,10 @@ def get_args():
         "--num_classes", type=int, default=23, help="number of classes",
     )
     parser.add_argument(
-        "--num_epochs", type=int, default=50, help="number of finetune epochs",
+        "--num_epochs", type=int, default=5, help="number of finetune epochs",
     )
     parser.add_argument(
-        "--warmup_epochs", type=int, default=5, help="number of finetune epochs",
+        "--warmup_epochs", type=int, default=1, help="number of finetune epochs",
     )
     parser.add_argument(
         "--data_dir",
@@ -74,6 +67,9 @@ def get_args():
         "--log_interval", type=int, default=10, help="log print interval",
     )
     parser.add_argument("--test_io", action="store_true", help="test io speed")
+    parser.add_argument(
+        "--save_snapshot", action="store_true", help="save checkpoint after evaluation"
+    )
 
     args = parser.parse_args()
     return args
@@ -108,8 +104,8 @@ if __name__ == "__main__":
 
     def to_device_fn(mode):
         def to_device(module_or_tensor, sbp=flow.sbp.split(0)):
-            if flow.env.get_world_size() == 1:
-                return module_or_tensor.to("cuda")
+            # if flow.env.get_world_size() == 1:
+            #    return module_or_tensor.to("cuda")
             if mode == "eager":
                 return module_or_tensor.to("cuda")
             elif mode == "eager_global":
@@ -174,19 +170,13 @@ if __name__ == "__main__":
     # model = to_device(model, sbp=flow.sbp.broadcast)
     to_device(model, sbp=flow.sbp.broadcast)
 
-    # 数据预处理
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    val_transforms = transforms.Compose(
-        [transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize,]
-    )
-    train_transforms = transforms.Compose(
-        [
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]
-    )
+    def save_model(subdir):
+        if not args.output:
+            return
+        save_path = os.path.join(args.output, subdir)
+        r0_print(f"Saving model to {save_path}")
+        state_dict = model.state_dict()
+        flow.save(state_dict, save_path, global_dst_rank=0)
 
     # 加载训练数据
     assert os.path.isdir(args.data_dir), "Dataset folder is not available."
@@ -232,3 +222,6 @@ if __name__ == "__main__":
         )
         metrics = eval(model, val_prefetched)
         r0_print(f"epoch {epoch}", metrics)
+        if args.save_snapshot:
+            subdir = f"snapshot_epoch{epoch}_acc{metrics['accuarcy']}"
+            save_model(subdir)
