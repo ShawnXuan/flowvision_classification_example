@@ -1,6 +1,7 @@
 import os
 import time
 import math
+import pickle
 import argparse
 import numpy as np
 
@@ -38,10 +39,10 @@ def get_args():
         "--num_classes", type=int, default=23, help="number of classes",
     )
     parser.add_argument(
-        "--num_epochs", type=int, default=5, help="number of finetune epochs",
+        "--num_epochs", type=int, default=50, help="number of finetune epochs",
     )
     parser.add_argument(
-        "--warmup_epochs", type=int, default=1, help="number of finetune epochs",
+        "--warmup_epochs", type=int, default=5, help="number of finetune epochs",
     )
     parser.add_argument(
         "--data_dir",
@@ -50,7 +51,7 @@ def get_args():
         help="Dataset root path, must contain subfolder `train` and `val`",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=64, help="Validation batch size",
+        "--batch_size", type=int, default=100, help="batch size",
     )
     parser.add_argument(
         "--num_workers",
@@ -62,7 +63,7 @@ def get_args():
         "--output",
         type=str,
         default="output",
-        help="Directory to save Evaluation results(results.pkl).",
+        help="Directory to save classes.pkl.",
     )
     parser.add_argument(
         "--log_interval", type=int, default=10, help="log print interval",
@@ -188,6 +189,7 @@ if __name__ == "__main__":
         train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True
     )
     num_batches = len(train_loader)
+    classes = train_dataset.classes
     if args.test_io:
         r0_print("start test io...")
         num_samples, last_time = 0, time.time()
@@ -202,6 +204,17 @@ if __name__ == "__main__":
 
     # 加载验证数据
     val_dataset = datasets.ImageFolder(os.path.join(args.data_dir, "val"), transform=val_transforms)
+    r0_print(classes)
+    r0_print(val_dataset.classes)
+    assert classes == val_dataset.classes
+
+    # 保存类别
+    if flow.env.get_rank() == 0:
+        classes_file = os.path.join(args.output, "classes.pkl")
+        with open(classes_file, "wb") as f:
+            pickle.dump(classes, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Saving classes to {classes_file}")
+
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
     val_prefetched = [batch for batch in val_loader]
 
