@@ -219,6 +219,12 @@ if __name__ == "__main__":
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
     val_prefetched = [batch for batch in val_loader]
 
+    if flow.env.get_rank() == 0:
+        filepath = os.path.join(args.output, "val_imagepath_label.pkl")
+        with open(filepath, "wb") as f:
+            pickle.dump(val_dataset.samples, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Saving validation image file path and label to {filepath}")
+
     # 优化器
     optimizer = optim.AdamW(
         model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0001
