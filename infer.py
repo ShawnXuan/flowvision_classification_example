@@ -50,9 +50,11 @@ def get_args():
 
 
 def read_and_transform(filepath):
-    img = Image.open(filepath)
-    img = img.convert("RGB")
-    return val_transforms(img).to('cuda').unsqueeze(0)
+    # https://github.com/pytorch/vision/blob/main/torchvision/datasets/folder.py#L244
+    with open(filepath, "rb") as f:
+        img = Image.open(f)
+        img = img.convert("RGB")
+        return val_transforms(img).to('cuda').unsqueeze(0)
 
 
 if __name__ == "__main__":
