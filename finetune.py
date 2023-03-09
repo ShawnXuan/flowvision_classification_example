@@ -14,7 +14,7 @@ from oneflow import optim as optim
 from oneflow.optim.lr_scheduler import LambdaLR
 from flowvision.loss.cross_entropy import LabelSmoothingCrossEntropy
 
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, confusion_matrix
 
 from utils import model_dict, val_transforms, train_transforms
 
@@ -143,7 +143,8 @@ if __name__ == "__main__":
 
         # 计算精度
         metric = accuracy_score(labels, preds)
-        return {"accuarcy": metric}
+        cm = confusion_matrix(labels, preds)
+        return {"accuarcy": metric, "confusion_matrix": cm, "labels": labels, "preds": preds}
 
     def train_one_epoch(
         model, train_loader, criterion, optimizer, lr_scheduler, epoch, log_interval
@@ -218,6 +219,12 @@ if __name__ == "__main__":
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
     val_prefetched = [batch for batch in val_loader]
 
+    if flow.env.get_rank() == 0:
+        filepath = os.path.join(args.output, "val_imagepath_label.pkl")
+        with open(filepath, "wb") as f:
+            pickle.dump(val_dataset.samples, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Saving validation image file path and label to {filepath}")
+
     # 优化器
     optimizer = optim.AdamW(
         model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0001
@@ -235,7 +242,11 @@ if __name__ == "__main__":
             model, train_loader, criterion, optimizer, lr_scheduler, epoch, args.log_interval
         )
         metrics = eval(model, val_prefetched)
-        r0_print(f"epoch {epoch}", metrics)
+        r0_print(f"epoch {epoch}", metrics["accuarcy"])
         if args.save_snapshot:
             subdir = f"snapshot_epoch{epoch}_acc{metrics['accuarcy']}"
             save_model(subdir)
+            metric_file = f"metric_epoch{epoch}_acc{metrics['accuarcy']}.pkl"
+            with open(metric_file, "wb") as f:
+                pickle.dump(metrics, f, protocol=pickle.HIGHEST_PROTOCOL)
+

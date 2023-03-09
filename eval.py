@@ -8,6 +8,10 @@ from PIL import Image
 import oneflow as flow
 import oneflow.nn as nn
 from utils import model_dict, val_transforms
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+import flowvision.datasets as datasets
+from oneflow.utils.data import DataLoader
 
 
 def get_args():
@@ -33,10 +37,10 @@ def get_args():
         "--num_classes", type=int, default=23, help="number of classes",
     )
     parser.add_argument(
-        "--filepath",
+        "--data_dir",
         type=str,
-        default="val/n10565667/ILSVRC2012_val_00000255.JPEG",
-        help="path to an image file",
+        default="/path/to/val",
+        help="path to val folder",
     )
     parser.add_argument(
         "--classes_file",
@@ -44,14 +48,38 @@ def get_args():
         default="output/classes.pkl",
         help="path to classes file",
     )
+    parser.add_argument(
+        "--batch_size", type=int, default=100, help="batch size",
+    )
 
     args = parser.parse_args()
     return args
 
 
-def read_and_transform(filepath):
-    img = Image.open(filepath)
-    return val_transforms(img).to('cuda').unsqueeze(0)
+def eval(model, val_loader, log_interval=0):
+    n_steps = len(val_loader)
+    model.eval()
+    pred_list, label_list = [], []
+
+    with flow.no_grad():
+        print("start evaluation...")
+        for step, (images, labels) in enumerate(val_loader):
+            # 将图像传递给模型进行评估
+            outputs = model(images.cuda())  # (batch_size, n_classes)
+            pred = flow.argmax(outputs, dim=-1)  # (batch_size,)
+            pred_list.append(pred)
+            label_list.append(labels)
+            if log_interval > 0:
+                if (step + 1) % log_interval == 0:
+                    print(f"{step+1} of {n_steps} batches")
+
+    preds = np.concatenate([pred.to("cpu").numpy() for pred in pred_list])
+    labels = np.concatenate([label.numpy() for label in label_list])
+
+    # 计算精度
+    metric = accuracy_score(labels, preds)
+    cm = confusion_matrix(labels, preds)
+    return {"accuarcy": metric, "confusion_matrix": cm, "labels": labels, "preds": preds}
 
 
 if __name__ == "__main__":
@@ -72,15 +100,11 @@ if __name__ == "__main__":
     state_dict = flow.load(args.snapshot)
     model.load_state_dict(state_dict, strict=True)
     model.to("cuda")
-    model.eval()
 
     # 加载训练数据
-    x = read_and_transform(args.filepath)
-    pred = model(x)
-    pred_index = flow.argmax(pred, 1).numpy()[0]
-    print(pred_index)
-    with open(args.classes_file, "rb") as f:
-        classes = pickle.load(f)
-        print(classes)
-        print(classes[pred_index])
+    val_dataset = datasets.ImageFolder(args.data_dir, transform=val_transforms)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
+    val_prefetched = [batch for batch in val_loader]
+    metric = eval(model, val_prefetched)
+    print(metric)
 
