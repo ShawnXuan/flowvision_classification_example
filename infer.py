@@ -51,6 +51,7 @@ def get_args():
 
 def read_and_transform(filepath):
     img = Image.open(filepath)
+    img = img.convert("RGB")
     return val_transforms(img).to('cuda').unsqueeze(0)
 
 
