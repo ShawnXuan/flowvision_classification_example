@@ -36,9 +36,6 @@ def get_args():
         "--mode", type=str, default="eager_global", help=f"eager, eager_global",
     )
     parser.add_argument(
-        "--num_classes", type=int, default=23, help="number of classes",
-    )
-    parser.add_argument(
         "--num_epochs", type=int, default=50, help="number of finetune epochs",
     )
     parser.add_argument(
@@ -104,6 +101,49 @@ if __name__ == "__main__":
     args = get_args()
     r0_print(args)
 
+    # 加载训练数据
+    assert os.path.isdir(args.data_dir), "Dataset folder is not available."
+    train_dataset = datasets.ImageFolder(
+        os.path.join(args.data_dir, "train"), transform=train_transforms
+    )
+    train_loader = DataLoader(
+        train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True
+    )
+    num_batches = len(train_loader)
+    classes = train_dataset.classes
+    if args.test_io:
+        r0_print("start test io...")
+        num_samples, last_time = 0, time.time()
+        for step, (images, labels) in enumerate(train_loader):
+            num_samples += labels.shape[0]
+            assert args.log_interval
+            if (step + 1) % args.log_interval == 0:
+                throughput = num_samples / (time.time() - last_time)
+                r0_print(f"step {step+1} of {num_batches}, throughput {throughput:.1f} samples/sec")
+                num_samples, last_time = 0, time.time()
+        exit()
+
+    # 加载验证数据
+    val_dataset = datasets.ImageFolder(os.path.join(args.data_dir, "val"), transform=val_transforms)
+    assert classes == val_dataset.classes
+    num_classes = len(classes)
+
+    # 保存类别
+    if flow.env.get_rank() == 0:
+        classes_file = os.path.join(args.output, "classes.pkl")
+        with open(classes_file, "wb") as f:
+            pickle.dump(classes, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Saving classes to {classes_file}")
+
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
+    val_prefetched = [batch for batch in val_loader]
+
+    if flow.env.get_rank() == 0:
+        filepath = os.path.join(args.output, "val_imagepath_label.pkl")
+        with open(filepath, "wb") as f:
+            pickle.dump(val_dataset.samples, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Saving validation image file path and label to {filepath}")
+
     def to_device_fn(mode):
         def to_device(module_or_tensor, sbp=flow.sbp.split(0)):
             # if flow.env.get_world_size() == 1:
@@ -168,8 +208,8 @@ if __name__ == "__main__":
     model = model_dict[args.model](pretrained=True)
 
     # 设置类别数, 注意：最后一层必须是`fc`
-    assert args.num_classes > 0
-    model.fc = nn.Linear(model.fc.in_features, args.num_classes)
+    assert num_classes > 0
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
     # model = to_device(model, sbp=flow.sbp.broadcast)
     to_device(model, sbp=flow.sbp.broadcast)
 
@@ -180,50 +220,6 @@ if __name__ == "__main__":
         r0_print(f"Saving model to {save_path}")
         state_dict = model.state_dict()
         flow.save(state_dict, save_path, global_dst_rank=0)
-
-    # 加载训练数据
-    assert os.path.isdir(args.data_dir), "Dataset folder is not available."
-    train_dataset = datasets.ImageFolder(
-        os.path.join(args.data_dir, "train"), transform=train_transforms
-    )
-    train_loader = DataLoader(
-        train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True
-    )
-    num_batches = len(train_loader)
-    classes = train_dataset.classes
-    if args.test_io:
-        r0_print("start test io...")
-        num_samples, last_time = 0, time.time()
-        for step, (images, labels) in enumerate(train_loader):
-            num_samples += labels.shape[0]
-            assert args.log_interval
-            if (step + 1) % args.log_interval == 0:
-                throughput = num_samples / (time.time() - last_time)
-                r0_print(f"step {step+1} of {num_batches}, throughput {throughput:.1f} samples/sec")
-                num_samples, last_time = 0, time.time()
-        exit()
-
-    # 加载验证数据
-    val_dataset = datasets.ImageFolder(os.path.join(args.data_dir, "val"), transform=val_transforms)
-    r0_print(classes)
-    r0_print(val_dataset.classes)
-    assert classes == val_dataset.classes
-
-    # 保存类别
-    if flow.env.get_rank() == 0:
-        classes_file = os.path.join(args.output, "classes.pkl")
-        with open(classes_file, "wb") as f:
-            pickle.dump(classes, f, protocol=pickle.HIGHEST_PROTOCOL)
-            print(f"Saving classes to {classes_file}")
-
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
-    val_prefetched = [batch for batch in val_loader]
-
-    if flow.env.get_rank() == 0:
-        filepath = os.path.join(args.output, "val_imagepath_label.pkl")
-        with open(filepath, "wb") as f:
-            pickle.dump(val_dataset.samples, f, protocol=pickle.HIGHEST_PROTOCOL)
-            print(f"Saving validation image file path and label to {filepath}")
 
     # 优化器
     optimizer = optim.AdamW(
