@@ -34,9 +34,6 @@ def get_args():
         help=f"path to snapshot",
     )
     parser.add_argument(
-        "--num_classes", type=int, default=23, help="number of classes",
-    )
-    parser.add_argument(
         "--data_dir",
         type=str,
         default="/path/to/val",
@@ -86,13 +83,19 @@ if __name__ == "__main__":
     args = get_args()
     print(args)
 
-    # 加载预训练模型
+    # 加载验证数据
+    val_dataset = datasets.ImageFolder(args.data_dir, transform=val_transforms)
+    num_classes = len(val_dataset.classes)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
+    val_prefetched = [batch for batch in val_loader]
+
+    # 加载模型
     assert args.model in model_dict
     model = model_dict[args.model](pretrained=False)
 
     # 设置类别数, 注意：最后一层必须是`fc`
-    assert args.num_classes > 0
-    model.fc = nn.Linear(model.fc.in_features, args.num_classes)
+    assert num_classes > 0
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
     
     # 导入模型
     assert args.snapshot
@@ -101,10 +104,6 @@ if __name__ == "__main__":
     model.load_state_dict(state_dict, strict=True)
     model.to("cuda")
 
-    # 加载训练数据
-    val_dataset = datasets.ImageFolder(args.data_dir, transform=val_transforms)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
-    val_prefetched = [batch for batch in val_loader]
     metric = eval(model, val_prefetched)
     print(metric)
 

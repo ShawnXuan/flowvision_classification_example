@@ -30,9 +30,6 @@ def get_args():
         help=f"path to snapshot",
     )
     parser.add_argument(
-        "--num_classes", type=int, default=23, help="number of classes",
-    )
-    parser.add_argument(
         "--filepath",
         type=str,
         default="val/n10565667/ILSVRC2012_val_00000255.JPEG",
@@ -61,13 +58,18 @@ if __name__ == "__main__":
     args = get_args()
     print(args)
 
+    # 加载类别列表
+    with open(args.classes_file, "rb") as f:
+        classes = pickle.load(f)
+        num_classes = len(classes)
+
     # 加载预训练模型
     assert args.model in model_dict
     model = model_dict[args.model](pretrained=False)
 
     # 设置类别数, 注意：最后一层必须是`fc`
-    assert args.num_classes > 0
-    model.fc = nn.Linear(model.fc.in_features, args.num_classes)
+    assert num_classes > 0
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
     
     # 导入模型
     assert args.snapshot
@@ -81,9 +83,5 @@ if __name__ == "__main__":
     x = read_and_transform(args.filepath)
     pred = model(x)
     pred_index = flow.argmax(pred, 1).numpy()[0]
-    print(pred_index)
-    with open(args.classes_file, "rb") as f:
-        classes = pickle.load(f)
-        print(classes)
-        print(classes[pred_index])
+    print(f"prediction index:{pred_index}, prediction class: {classes[pred_index]}")
 
