@@ -51,12 +51,14 @@ def read_and_transform(filepath):
     with open(filepath, "rb") as f:
         img = Image.open(f)
         img = img.convert("RGB")
-        return val_transforms(img).to('cuda').unsqueeze(0)
+        return val_transforms(img).unsqueeze(0)
 
 
 if __name__ == "__main__":
     args = get_args()
     print(args)
+    
+    device = "cuda" if flow.cuda.is_available() else "cpu"
 
     # 加载类别列表
     with open(args.classes_file, "rb") as f:
@@ -76,12 +78,12 @@ if __name__ == "__main__":
     print(f"Loading model from {args.snapshot}")
     state_dict = flow.load(args.snapshot)
     model.load_state_dict(state_dict, strict=True)
-    model.to("cuda")
+    model.to(device)
     model.eval()
 
     # 加载训练数据
     x = read_and_transform(args.filepath)
-    pred = model(x)
+    pred = model(x.to(device))
     pred_index = flow.argmax(pred, 1).numpy()[0]
     print(f"prediction index:{pred_index}, prediction class: {classes[pred_index]}")
 
