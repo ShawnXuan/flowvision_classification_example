@@ -33,9 +33,6 @@ def get_args():
         help=f"Supported models: {', '.join(model_dict.keys())}",
     )
     parser.add_argument(
-        "--mode", type=str, default="eager_global", help=f"eager, eager_global",
-    )
-    parser.add_argument(
         "--num_epochs", type=int, default=50, help="number of finetune epochs",
     )
     parser.add_argument(
@@ -57,10 +54,7 @@ def get_args():
         help="how many subprocesses to use for data loading. 0 means using the main process",
     )
     parser.add_argument(
-        "--output",
-        type=str,
-        default="output",
-        help="Directory to save classes.pkl.",
+        "--output", type=str, default="output", help="Directory to save classes.pkl.",
     )
     parser.add_argument(
         "--log_interval", type=int, default=10, help="log print interval",
@@ -102,12 +96,17 @@ if __name__ == "__main__":
     r0_print(args)
 
     # 加载训练数据
+    batch_size_per_device = args.batch_size // flow.env.get_world_size()
     assert os.path.isdir(args.data_dir), "Dataset folder is not available."
     train_dataset = datasets.ImageFolder(
         os.path.join(args.data_dir, "train"), transform=train_transforms
     )
+    train_sampler = flow.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = DataLoader(
-        train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True
+        train_dataset,
+        batch_size=batch_size_per_device,
+        num_workers=args.num_workers,
+        sampler=train_sampler,
     )
     num_batches = len(train_loader)
     classes = train_dataset.classes
@@ -135,7 +134,8 @@ if __name__ == "__main__":
             pickle.dump(classes, f, protocol=pickle.HIGHEST_PROTOCOL)
             print(f"Saving classes to {classes_file}")
 
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
+    val_sampler = flow.utils.data.distributed.DistributedSampler(val_dataset, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size_per_device, sampler=val_sampler)
     val_prefetched = [batch for batch in val_loader]
 
     if flow.env.get_rank() == 0:
@@ -144,22 +144,8 @@ if __name__ == "__main__":
             pickle.dump(val_dataset.samples, f, protocol=pickle.HIGHEST_PROTOCOL)
             print(f"Saving validation image file path and label to {filepath}")
 
-    def to_device_fn(mode):
-        def to_device(module_or_tensor, sbp=flow.sbp.split(0)):
-            # if flow.env.get_world_size() == 1:
-            #    return module_or_tensor.to("cuda")
-            if mode == "eager":
-                return module_or_tensor.to("cuda")
-            elif mode == "eager_global":
-                return module_or_tensor.to_global(flow.env.all_device_placement("cuda"), sbp)
-            elif mode == "graph":
-                assert 0, "graph mode is UNIMPLEMENTED"
-            else:
-                assert 0
-
-        return to_device
-
-    to_device = to_device_fn(args.mode)
+    def to_global(module_or_tensor, sbp=flow.sbp.split(0), device="cuda"):
+        return module_or_tensor.to_global(flow.env.all_device_placement(device), sbp)
 
     def eval(model, val_loader, log_interval=0):
         n_steps = len(val_loader)
@@ -170,10 +156,10 @@ if __name__ == "__main__":
             r0_print("start evaluation...")
             for step, (images, labels) in enumerate(val_loader):
                 # 将图像传递给模型进行评估
-                outputs = model(to_device(images))  # (batch_size, n_classes)
+                outputs = model(to_global(images))  # (batch_size, n_classes)
                 pred = flow.argmax(outputs, dim=-1)  # (batch_size,)
                 pred_list.append(pred)
-                label_list.append(labels)
+                label_list.append(to_global(labels, device="cpu"))
                 if log_interval > 0:
                     if (step + 1) % log_interval == 0:
                         r0_print(f"{step+1} of {n_steps} batches")
@@ -192,8 +178,8 @@ if __name__ == "__main__":
         n_steps = len(train_loader)
         model.train()
         for step, (images, labels) in enumerate(train_loader):
-            outputs = model(to_device(images))  # (batch_size, n_classes)
-            loss = criterion(outputs, to_device(labels))
+            outputs = model(to_global(images))  # (batch_size, n_classes)
+            loss = criterion(outputs, to_global(labels))
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -210,8 +196,7 @@ if __name__ == "__main__":
     # 设置类别数, 注意：最后一层必须是`fc`
     assert num_classes > 0
     model.fc = nn.Linear(model.fc.in_features, num_classes)
-    # model = to_device(model, sbp=flow.sbp.broadcast)
-    to_device(model, sbp=flow.sbp.broadcast)
+    model = to_global(model, sbp=flow.sbp.broadcast)
 
     def save_model(subdir):
         if not args.output:
@@ -231,7 +216,7 @@ if __name__ == "__main__":
     num_training_steps = num_batches * args.num_epochs
     lr_scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps)
     criterion = LabelSmoothingCrossEntropy(smoothing=0.1).to("cuda")
-    to_device(criterion, sbp=flow.sbp.broadcast)
+    to_global(criterion, sbp=flow.sbp.broadcast)
 
     for epoch in range(args.num_epochs):
         train_one_epoch(
@@ -245,4 +230,3 @@ if __name__ == "__main__":
             metric_file = f"metric_epoch{epoch}_acc{metrics['accuarcy']}.pkl"
             with open(metric_file, "wb") as f:
                 pickle.dump(metrics, f, protocol=pickle.HIGHEST_PROTOCOL)
-
