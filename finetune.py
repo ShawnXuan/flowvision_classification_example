@@ -54,10 +54,7 @@ def get_args():
         help="how many subprocesses to use for data loading. 0 means using the main process",
     )
     parser.add_argument(
-        "--output",
-        type=str,
-        default="output",
-        help="Directory to save classes.pkl.",
+        "--output", type=str, default="output", help="Directory to save classes.pkl.",
     )
     parser.add_argument(
         "--log_interval", type=int, default=10, help="log print interval",
@@ -106,7 +103,10 @@ if __name__ == "__main__":
     )
     train_sampler = flow.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size_per_device, num_workers=args.num_workers, sampler=train_sampler
+        train_dataset,
+        batch_size=batch_size_per_device,
+        num_workers=args.num_workers,
+        sampler=train_sampler,
     )
     num_batches = len(train_loader)
     classes = train_dataset.classes
@@ -230,4 +230,3 @@ if __name__ == "__main__":
             metric_file = f"metric_epoch{epoch}_acc{metrics['accuarcy']}.pkl"
             with open(metric_file, "wb") as f:
                 pickle.dump(metrics, f, protocol=pickle.HIGHEST_PROTOCOL)
-
